@@ -1,0 +1,20 @@
+# Terraform
+setup/terraform/.terraform/
+setup/terraform/terraform.tfstate
+setup/terraform/terraform.tfstate.*
+setup/terraform/.terraform.lock.hcl
+
+# Environment files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
