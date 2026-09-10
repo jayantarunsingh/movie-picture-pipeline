@@ -80,7 +80,7 @@ jobs:
         working-directory: starter/frontend
 
     env:
-      REACT_APP_MOVIE_API_URL: http://localhost:5000
+      REACT_APP_MOVIE_API_URL: ${{ secrets.BACKEND_API_URL }}
 
     steps:
       - name: Checkout
@@ -102,11 +102,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Docker image
-        run: docker build --build-arg REACT_APP_MOVIE_API_URL=$REACT_APP_MOVIE_API_URL -t mp-frontend:${{ github.sha }} .
+      - name: Run tests
+        run: CI=true npm test
 
-      - name: Temporary CD verification
-        run: echo "Temporary CD verification completed. AWS deployment is disabled until credentials are configured."
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg REACT_APP_MOVIE_API_URL=${{ secrets.BACKEND_API_URL }} \
+            -t ${{ steps.login-ecr.outputs.registry }}/frontend:${{ github.sha }} .
+
+      - name: Push Docker image
+        run: |
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/frontend:${{ github.sha }}
 
   deploy:
     name: Deploy
@@ -115,5 +135,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Temporary deployment placeholder
-        run: echo "AWS deployment temporarily disabled."
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region us-east-1 --name cluster
+
+      - name: Install kustomize
+        run: |
+          curl -sSLo kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz
+          sudo mv kustomize /usr/local/bin/kustomize
+          kustomize version
+
+      - name: Update image
+        working-directory: starter/frontend/k8s
+        run: |
+          kustomize edit set image \
+            frontend=823340737837.dkr.ecr.us-east-1.amazonaws.com/frontend:${{ github.sha }}
+
+      - name: Deploy
+        working-directory: starter/frontend/k8s
+        run: |
+          kustomize build | kubectl apply -f -
